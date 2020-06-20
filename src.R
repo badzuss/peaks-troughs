@@ -17,7 +17,7 @@ ipmg      <- data.frame(read_excel("data/IPMGCHNG_mom_sa.xlsx"))
 usgg10    <- data.frame(read_excel("data/USGG10yr.xlsx"))
 usur      <- data.frame(read_excel("data/USURTOT_mthly.xlsx"))
 
-colnames(spx500)  <- c("Date", "Close_spx", "Volume_spx")
+colnames(spx500)  <- c("Date", "Price_spx", "Volume_spx")
 colnames(cpi)     <- c("Date", "CPI")
 colnames(dvds)    <- c("Date", "Net_dvds", "Gross_dvds" )
 colnames(fdtr)    <- c("Date", "FDTR")
@@ -29,162 +29,218 @@ spx500$Volume_spx[spx500$Volume_spx == 0] <- NA
 
 # 3. Merging data -----------------------------------------
 
-# Merging daily data
+# Merging daily data ----
 
-# SP500
+# SP500 ----
 scanner(djia_core, spx500)
 djia_core <- merge(djia_core, spx500, by = "Date", all.x = TRUE)
+length(which(is.na(djia_core$Price_spx)))
 
-# FDTR
+#filling missing cells from "Price.spx" and "Volume.spx" columns with the average value of their closest neighbor cells
+djia_core[which(is.na(djia_core$Price_spx)),c("Price_spx", "Volume_spx")] <- 
+  (djia_core[which(is.na(djia_core$Price_spx))-1, c("Price_spx", "Volume_spx")] + 
+     djia_core[which(is.na(djia_core$Price_spx))+1, c("Price_spx", "Volume_spx")])/2
+
+length(which(is.na(djia_core$Price_spx)))
+
+# FDTR ----
 scanner(djia_core, fdtr)
 djia_core <- merge(djia_core, fdtr, by = "Date", all.x = TRUE)
 
-# DVDS
+#tail(which(is.na(djia_core$FDTR)),200)
+
+# DVDS ----
 scanner(djia_core, dvds)
 djia_core <- merge(djia_core, dvds, by = "Date", all.x = TRUE)
 djia_core$Net_dvds <- NULL
+length(which(is.na(djia_core$Gross_dvds)))
 
-# USGG10
+#filling missing "solitary" cells from "Gross_dvds" column with the average value of its closest neighbor cells
+djia_core[which(is.na(djia_core$Gross_dvds))[-(1:19)],"Gross_dvds"] <- 
+  (djia_core[which(is.na(djia_core$Gross_dvds))[-(1:19)]-1,"Gross_dvds"] + 
+     djia_core[which(is.na(djia_core$Gross_dvds))[-(1:19)]+1, "Gross_dvds"])/2
+
+length(which(is.na(djia_core$Gross_dvds)))
+
+
+# USGG10 ----
 scanner(djia_core, usgg10)
 djia_core <- merge(djia_core, usgg10, by = "Date", all.x = TRUE)
+length(which(is.na(djia_core$USGG10))[-(1:4108)])
 
-# Merging monthly data 
+#filling missing "solitary" cells from "USGG10" column with the average value of its closest neighbor cells
+djia_core[which(is.na(djia_core$USGG10))[-(1:4108)],"USGG10"] <- 
+  (djia_core[which(is.na(djia_core$USGG10))[-(1:4108)]-1,"USGG10"] + 
+     djia_core[which(is.na(djia_core$USGG10))[-(1:4108)]+1, "USGG10"])/2
 
-#CPI
-djia_core     <- merger(djia_core, cpi)
-djia_core$CPI <- filler(djia_core$CPI)
+length(which(is.na(djia_core$USGG10))[-(1:4108)])
 
-#USUR
-djia_core     <- merger(djia_core, usur)
-djia_core$USUR <- filler(djia_core$USUR)
-djia_core$USUR[year(ymd(djia_core$Date)) < year(ymd(usur$Date[1]))] <- NA
-
-#IPMG
-djia_core     <- merger(djia_core, ipmg)
-djia_core$IPMG <- filler(djia_core$IPMG)
-djia_core$IPMG[1:15] <- NA
-
-
-# 4. Features generation -----------------------------------------------------
-
-# Computing logarithmic returns
-djia_core$Return <- round(ROC(djia_core$Price, type = "discrete")*100, 2)
-
-# Labelling Returns
-dataset$ReturnTrend <- ifelse(dataset$Return >= 0, "Up", "Down")
-
-# Computing RSI:
-dataset$RSI_14 <- round(RSI(dataset$Price, n = 14, maType="WMA"),2)
-
-# Computing EMA:
-dataset$EMA_12 <- round(EMA(dataset$Price, n = 12),2)
-dataset$EMA_26 <- round(EMA(dataset$Price, n = 26),2)
-
-# Computing MACD:
-dataset$MACD <- round((dataset$EMA_26 - dataset$EMA_12),2)
-
-# Computing SMA:
-dataset$SMA_20 <- round(SMA(dataset$Price, n = 20), 2)
-
-# 4. Creating Subset (TPcand only) -------------------------------------
-
-small <- subset(data.frame(c(dataset[,1:3], dataset[,10:12])), dataset$TPcand == 1)
-small$TPcand <- NULL
-
-# Reordering observation numbers
-for(i in 1:nrow(small)){ rownames(small)[i] <- i}
-
-#Identifier's Price:
-small$IDPrice <- c(dataset[small$IDObs, "Price"])
-small <- small[ , c('Date','TPreal','ObsNo','Price','IDObs','IDPrice')]    # Columns reordering
-
+#filling the rest of missing cells with first previous available value
+for(i in which(is.na(djia_core$USGG10))[-(1:4108)]){
+  
+  djia_core[i,"USGG10"] <- djia_core[i-1,"USGG10"]
+  
+}
 rm(i)
 
-# 5. Small Subset appendix ------------------------------------------------
+length(which(is.na(djia_core$USGG10))[-(1:4108)])
 
-# * 5.1 Ups & Downs counter -----
-# Counting Ups (positive daily return) & Downs (negative daily return) between TPcand
-x <- 1
-y <- 0
 
-for(i in small$ObsNo){
-  y <- y + 1
-  UpsCounter <- 0
-  DownsCounter <- 0
-  for(j in x:i){
-    if(is.na(dataset$ReturnTrend[j]) == TRUE){
-      next
-    }
-    else if(dataset$ReturnTrend[j] == "Up"){
-      UpsCounter <- UpsCounter + 1
-    }
-    else if(dataset$ReturnTrend[j] == "Down"){
-      DownsCounter <- DownsCounter + 1
-    }
-  }
-  x <- i + 1    
-  small$UpsCounter[y] <- c(UpsCounter)
-  small$DownsCounter[y] <- c(DownsCounter)
-}
-rm(i,j,x,y, DownsCounter, UpsCounter)
 
-# * 5.2 Trend shifts counter -----
+
+# Merging monthly data ----
+
+# CPI ----
+djia_core     <- merger(djia_core, cpi)
+djia_core$CPI <- filler(djia_core$CPI)
+djia_core$CPI  <- monthlyTrimmer(djia_core, cpi)
+
+# USUR ----
+djia_core       <- merger(djia_core, usur)
+djia_core$USUR  <- filler(djia_core$USUR)
+djia_core$USUR  <- monthlyTrimmer(djia_core, usur)
+
+# IPMG ----
+djia_core     <- merger(djia_core, ipmg)
+djia_core$IPMG <- filler(djia_core$IPMG)
+djia_core$IPMG  <- monthlyTrimmer(djia_core, ipmg)
+
+
+
+rownames(djia_core) <- 1:nrow(djia_core)
+
+# 4. Low level features -----------------------------------------------------
+
+# Logarithmic returns ----
+djia_core$lReturn_djia  <- round(ROC(djia_core$Price)*100, 2)
+djia_core$lReturn_spx   <- round(ROC(djia_core$Price_spx)*100, 2)
+
+
+cor(djia_core$lReturn_djia[-1], djia_core$lReturn_spx[-1])
+
+# Labeling direction change of logarithmic returns ----
+djia_core$lReturnTrend_djia <- ifelse(djia_core$lReturn_djia >= 0, "Up", "Down")
+
+# RSI ----
+djia_core$RSI_14_djia <- round(RSI(djia_core$Price, n = 14, maType="WMA"),2)
+
+# EMA ----
+djia_core$EMA_12_djia <- round(EMA(djia_core$Price, n = 12),2)
+djia_core$EMA_26_djia <- round(EMA(djia_core$Price, n = 26),2)
+
+# MACD ----
+djia_core$MACD_djia <- round((djia_core$EMA_26_djia - djia_core$EMA_12_djia),2)
+
+# SMA ----
+djia_core$SMA_20_djia <- round(SMA(djia_core$Price, n = 20), 2)
+
+
+
+
+# [obsolete] 4. Creating Subset (TPcand only) -------------------------------------
+
+# small <- subset(data.frame(c(dataset[,1:3], dataset[,10:12])), dataset$TPcand == 1)
+# small$TPcand <- NULL
+# 
+# # Reordering observation numbers
+# for(i in 1:nrow(small)){ rownames(small)[i] <- i}
+# 
+# #Identifier's Price:
+# small$IDPrice <- c(dataset[small$IDObs, "Price"])
+# small <- small[ , c('Date','TPreal','ObsNo','Price','IDObs','IDPrice')]    # Columns reordering
+# 
+# rm(i)
+
+
+
+# 5. High level features ------------------------------------------------
+
+# Positive & Negative returns Counter ----
+# Counting positive daily return & negative daily return between TPcand
+# Trend shifts counter
 # Trend shift counter (No. transitions from positive to negative daily returns) between TPcand
-
-x <- 1
-y <- 0
-
-for(w in small$ObsNo){
-  y <- y + 1
-  ShiftCounter <- 0
-  for(i in x:w){
-    if(is.na(dataset$ReturnTrend[i]) == TRUE){
-      next
-    }
-    else if(is.na(dataset$ReturnTrend[i+1]) == TRUE){
-      next
-    }
-    else if(dataset$ReturnTrend[i] != dataset$ReturnTrend[i+1]){
-      ShiftCounter <- ShiftCounter + 1
-    }
-    x <- w + 1
-  }
-  small$ShiftCounter[y] <- c(ShiftCounter)
-}
-rm(i,w,x,y,ShiftCounter)
-# * 5.3 LU chain of positive returns TP -----
+# LU chain of positive returns
 # The longest uninterrupted chain of positive logarithmic returns between TPcand
+# LU chain of negative returns
+# The longest uninterrupted chain of negative logarithmic returns between TPcand
 
-x <- 1
+TPcand_index <- djia_core %>% filter(TPcand == 1) %>% select(ObsNo) %>% unlist() %>% as.numeric()
+
+djia_core$PosCount_TPcand   <- NA
+djia_core$NegCount_TPcand   <- NA
+djia_core$ShiftCount_TPcand <- NA
+djia_core$PosInaRow_TPcand  <- NA
+djia_core$NegInaRow_TPcand  <- NA
+
+x <- 2
 y <- 0
 
-for(i in small$ObsNo){
+for(i in TPcand_index){
   
-  y <- y + 1
-  UpsCounter <- 0
-  UpsTemp <- 1
+  y           <- y + 1
+  posCount    <- 0
+  negCount    <- 0
+  shiftCount  <- 0
+  posInaRow   <- 0
+  negInaRow   <- 0
+  
   
   for(j in x:i){
-    if(is.na(dataset$ReturnTrend[j]) == TRUE){
-      next
+
+    if(djia_core$lReturn_djia[j] >= 0){
+      
+      posCount  <- posCount + 1
+      posInaRow <- posInaRow + 1
+      negInaRow <- 0
+      
+      djia_core$PosCount_TPcand[j]  <- posCount
+      djia_core$NegCount_TPcand[j]  <- negCount
+      djia_core$PosInaRow_TPcand[j] <- posInaRow
+      djia_core$NegInaRow_TPcand[j] <- negInaRow
+      
+      if((j >= x+1) & (djia_core$lReturn_djia[j-1] < 0)){
+        
+        shiftCount <- shiftCount + 1
+        djia_core$ShiftCount_TPcand[j] <- shiftCount
+      }
+      
+      else if((j >= x+1) & (djia_core$lReturn_djia[j-1] >= 0)){
+        
+        djia_core$ShiftCount_TPcand[j] <- shiftCount
+      }
+      
     }
-    else if(is.na(dataset$ReturnTrend[j+1]) == TRUE){
-      next
+    
+    else if(djia_core$lReturn_djia[j] < 0){
+      
+      negCount  <- negCount + 1
+      negInaRow <- negInaRow + 1
+      posInaRow <- 0
+
+      djia_core$NegCount_TPcand[j]  <- negCount
+      djia_core$PosCount_TPcand[j]  <- posCount
+      djia_core$PosInaRow_TPcand[j] <- posInaRow
+      djia_core$NegInaRow_TPcand[j] <- negInaRow
+      
+      if((j >= x+1) & (djia_core$lReturn_djia[j-1] >= 0)){
+        
+        shiftCount <- shiftCount + 1
+        djia_core$ShiftCount_TPcand[j] <- shiftCount
+      }
+      
+      else if((j >= x+1) & (djia_core$lReturn_djia[j-1] < 0)){
+        
+        djia_core$ShiftCount_TPcand[j] <- shiftCount
+      }
+      
     }
-    else if(dataset$ReturnTrend[j] == "Up" && dataset$ReturnTrend[j+1] == "Up"){
-      UpsTemp <- UpsTemp + 1
-      if(UpsTemp > UpsCounter){
-        UpsCounter <- UpsTemp
-      } 
-    }
-    else{
-      UpsTemp <- 1
-    }
-    x <- i + 1
   }
-  small$LUCP[y] <- c(UpsCounter)
+  
+  x <- i + 1  
+
 }
-rm(UpsCounter,UpsTemp,i,j,x,y)
+
+
 # * 5.4 LU logreturn gain between TP -----
 # The largest uninterrupted logarithmic return gain between TPcand
 
@@ -218,39 +274,7 @@ for(i in small$ObsNo){
   small$LUG[y] <- c(Magnitude)
 }
 rm(i,j,Magnitude, MagTemp,x,y)
-# * 5.5 LU chain of negative returns TP ----
-# The longest uninterrupted chain of negative logarithmic returns between TPcand
 
-x <- 1
-y <- 0
-
-for(i in small$ObsNo){
-  
-  y <- y + 1
-  DownsCounter <- 0
-  DownsTemp <- 1
-  
-  for(j in x:i){
-    if(is.na(dataset$ReturnTrend[j]) == TRUE){
-      next
-    }
-    else if(is.na(dataset$ReturnTrend[j+1]) == TRUE){
-      next
-    }
-    else if(dataset$ReturnTrend[j] == "Down" && dataset$ReturnTrend[j+1] == "Down"){
-      DownsTemp <- DownsTemp + 1
-      if(DownsTemp > DownsCounter){
-        DownsCounter <- DownsTemp
-      } 
-    }
-    else{
-      DownsTemp <- 1
-    }
-    x <- i + 1
-  }
-  small$LUCN[y] <- c(DownsCounter)
-} 
-rm(DownsCounter,DownsTemp,i,j,x,y)
 # * 5.6 LU logreturn loss between TP -----
 # The largest uninterrupted logarithmic return loss between TPcand
 
@@ -285,6 +309,7 @@ for(i in small$ObsNo){
 }
 
 rm(i,j,Magnitude,MagTemp,x,y)
+
 
 # * 5.7 "Between TPcand pairs" features ----
 

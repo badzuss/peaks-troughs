@@ -1,9 +1,9 @@
 {
-    "path" : "~/Studia/Kozminski/Kozminski_BDA/Business Project/Turning points in Financial Markets/R/peaks-troughs",
-    "sortOrder" : [
+    "path": "~/Studia/Kozminski/Kozminski_BDA/Business Project/Turning points in Financial Markets/R/peaks-troughs",
+    "sortOrder": [
         {
-            "ascending" : true,
-            "columnIndex" : 2
+            "columnIndex": 2,
+            "ascending": true
         }
     ]
 }
