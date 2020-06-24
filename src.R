@@ -112,431 +112,75 @@ rownames(djia_core) <- 1:nrow(djia_core)
 # 4. Low level features -----------------------------------------------------
 
 # Logarithmic returns ----
-djia_core$lReturn_djia  <- round(ROC(djia_core$Price)*100, 2)
-djia_core$lReturn_spx   <- round(ROC(djia_core$Price_spx)*100, 2)
+djia_core$lReturn_djia  <- round(ROC(djia_core$Price), 6)
+djia_core$lReturn_spx   <- round(ROC(djia_core$Price_spx), 6)
 
 
 cor(djia_core$lReturn_djia[-1], djia_core$lReturn_spx[-1])
 
-# Labeling direction change of logarithmic returns ----
-djia_core$lReturnTrend_djia <- ifelse(djia_core$lReturn_djia >= 0, "Up", "Down")
+# Rate of chance of trading volume ----
+djia_core$ROC_vol_spx   <- round(ROC(djia_core$Volume_spx), 6)
+
+# Volatility ----
+noSessions <- as.numeric(table(year(djia_core$Date)))
+avgNoSessions <- round(mean(noSessions[2:length(noSessions)]))
+
+djia_core$Volatility_W <- volatility(djia_core$Price, 5, calc = "close", N = avgNoSessions)
+djia_core$Volatility_M <- volatility(djia_core$Price, 21, calc = "close", N = avgNoSessions)
+djia_core$Volatility_Q <- volatility(djia_core$Price, 63, calc = "close", N = avgNoSessions)
+djia_core$Volatility_Y <- volatility(djia_core$Price, n = avgNoSessions, calc = "close", N = avgNoSessions)
+
+rm(noSessions,avgNoSessions)
+
+# Weekday/ Month Identification ----
+djia_core <- daysMonthsID(djia_core)
 
 # RSI ----
-djia_core$RSI_14_djia <- round(RSI(djia_core$Price, n = 14, maType="WMA"),2)
+djia_core$RSI_djia <- round(RSI(djia_core$Price, n = 21, maType="WMA"),2)
 
 # EMA ----
-djia_core$EMA_12_djia <- round(EMA(djia_core$Price, n = 12),2)
-djia_core$EMA_26_djia <- round(EMA(djia_core$Price, n = 26),2)
-
-# MACD ----
-djia_core$MACD_djia <- round((djia_core$EMA_26_djia - djia_core$EMA_12_djia),2)
+djia_core$EMA_djia <- round(EMA(djia_core$Price, n = 21),2)
 
 # SMA ----
-djia_core$SMA_20_djia <- round(SMA(djia_core$Price, n = 20), 2)
+djia_core$SMA_djia <- round(SMA(djia_core$Price, n = 21), 2)
 
-
-
-
-# [obsolete] 4. Creating Subset (TPcand only) -------------------------------------
-
-# small <- subset(data.frame(c(dataset[,1:3], dataset[,10:12])), dataset$TPcand == 1)
-# small$TPcand <- NULL
-# 
-# # Reordering observation numbers
-# for(i in 1:nrow(small)){ rownames(small)[i] <- i}
-# 
-# #Identifier's Price:
-# small$IDPrice <- c(dataset[small$IDObs, "Price"])
-# small <- small[ , c('Date','TPreal','ObsNo','Price','IDObs','IDPrice')]    # Columns reordering
-# 
-# rm(i)
-
+# Returns structure between TPcand ----
+djia_core <- returnStruct(djia_core)
+# Returns chain distribution (mean) between TPcand ----
+djia_core <- chainDistribution(djia_core)
 
 
 # 5. High level features ------------------------------------------------
 
-# Positive & Negative returns Counter ----
-# Counting positive daily return & negative daily return between TPcand
-# Trend shifts counter
-# Trend shift counter (No. transitions from positive to negative daily returns) between TPcand
-# LU chain of positive returns
-# The longest uninterrupted chain of positive logarithmic returns between TPcand
-# LU chain of negative returns
-# The longest uninterrupted chain of negative logarithmic returns between TPcand
+# Returns structure between TPcand and its identifier ----
+djia_core <- returnStruct2(djia_core)
+# Returns chain distribution (mean) between TPcand and its identifier ----
+djia_core <- chainDistribution2(djia_core)
 
-TPcand_index <- djia_core %>% filter(TPcand == 1) %>% select(ObsNo) %>% unlist() %>% as.numeric()
 
-djia_core$PosCount_TPcand   <- NA
-djia_core$NegCount_TPcand   <- NA
-djia_core$ShiftCount_TPcand <- NA
-djia_core$PosInaRow_TPcand  <- NA
-djia_core$NegInaRow_TPcand  <- NA
 
-x <- 2
-y <- 0
+# 6. Cleaning data ------------------------------------------------------
 
-for(i in TPcand_index){
-  
-  y           <- y + 1
-  posCount    <- 0
-  negCount    <- 0
-  shiftCount  <- 0
-  posInaRow   <- 0
-  negInaRow   <- 0
-  
-  
-  for(j in x:i){
+gist <- djia_core[which(is.na(djia_core$Volume_spx) == FALSE)[1] : nrow(djia_core),]
+gist <- gist %>% filter(TPcand == 1) %>% select(-c("Date", "ObsNo", "L1P", "L1T", "L2P", 
+                                                         "L2T", "L3P", "L3T", "IDObs", "TPcand",
+                                                         "Weekday", "Month", "PosInaRow_TPcand",
+                                                         "NegInaRow_TPcand", "GainInaRow_TPcand",
+                                                         "LossInaRow_TPcand", "FDTR", "USGG10")) %>%
+  mutate(TPreal = factor(TPreal, levels = c(0,1), labels = c("False", "True")))
 
-    if(djia_core$lReturn_djia[j] >= 0){
-      
-      posCount  <- posCount + 1
-      posInaRow <- posInaRow + 1
-      negInaRow <- 0
-      
-      djia_core$PosCount_TPcand[j]  <- posCount
-      djia_core$NegCount_TPcand[j]  <- negCount
-      djia_core$PosInaRow_TPcand[j] <- posInaRow
-      djia_core$NegInaRow_TPcand[j] <- negInaRow
-      
-      if((j >= x+1) & (djia_core$lReturn_djia[j-1] < 0)){
-        
-        shiftCount <- shiftCount + 1
-        djia_core$ShiftCount_TPcand[j] <- shiftCount
-      }
-      
-      else if((j >= x+1) & (djia_core$lReturn_djia[j-1] >= 0)){
-        
-        djia_core$ShiftCount_TPcand[j] <- shiftCount
-      }
-      
-    }
-    
-    else if(djia_core$lReturn_djia[j] < 0){
-      
-      negCount  <- negCount + 1
-      negInaRow <- negInaRow + 1
-      posInaRow <- 0
-
-      djia_core$NegCount_TPcand[j]  <- negCount
-      djia_core$PosCount_TPcand[j]  <- posCount
-      djia_core$PosInaRow_TPcand[j] <- posInaRow
-      djia_core$NegInaRow_TPcand[j] <- negInaRow
-      
-      if((j >= x+1) & (djia_core$lReturn_djia[j-1] >= 0)){
-        
-        shiftCount <- shiftCount + 1
-        djia_core$ShiftCount_TPcand[j] <- shiftCount
-      }
-      
-      else if((j >= x+1) & (djia_core$lReturn_djia[j-1] < 0)){
-        
-        djia_core$ShiftCount_TPcand[j] <- shiftCount
-      }
-      
-    }
-  }
-  
-  x <- i + 1  
-
-}
-
-
-# * 5.4 LU logreturn gain between TP -----
-# The largest uninterrupted logarithmic return gain between TPcand
-
-x <- 1
-y <- 0
-
-for(i in small$ObsNo){
-  
-  y <- y + 1
-  Magnitude <- 0
-  MagTemp <- 0
-  
-  for(j in x:i){
-    if(is.na(dataset$ReturnTrend[j]) == TRUE){
-      next
-    }
-    else if(is.na(dataset$ReturnTrend[j+1]) == TRUE){
-      next
-    }
-    else if(dataset$ReturnTrend[j] == "Up"){
-      MagTemp <- MagTemp + dataset$Return[j]
-    }
-    else if(dataset$ReturnTrend[j] != "Up"){
-      if(Magnitude < MagTemp){
-        Magnitude <- MagTemp                                
-      }
-      MagTemp <- 0
-    }
-    x <- i + 1
-  }
-  small$LUG[y] <- c(Magnitude)
-}
-rm(i,j,Magnitude, MagTemp,x,y)
-
-# * 5.6 LU logreturn loss between TP -----
-# The largest uninterrupted logarithmic return loss between TPcand
-
-x <- 1
-y <- 0
-
-for(i in small$ObsNo){
-  
-  y <- y + 1
-  Magnitude <- 0
-  MagTemp <- 0
-  
-  for(j in x:i){
-    if(is.na(dataset$ReturnTrend[j]) == TRUE){
-      next
-    }
-    else if(is.na(dataset$ReturnTrend[j+1]) == TRUE){
-      next
-    }
-    else if(dataset$ReturnTrend[j] == "Down"){
-      MagTemp <- MagTemp + dataset$Return[j]
-    }
-    else if(dataset$ReturnTrend[j] != "Down"){
-      if(Magnitude > MagTemp){
-        Magnitude <- MagTemp                                
-      }
-      MagTemp <- 0
-    }
-    x <- i + 1
-  }
-  small$LUL[y] <- c(Magnitude)
-}
-
-rm(i,j,Magnitude,MagTemp,x,y)
-
-
-# * 5.7 "Between TPcand pairs" features ----
-
-##Returns between TPcand pair
-small$ReturnBetTP <- round((log(small$Price) - log(lag(small$Price,1)))*100,2)
-small$ReturnBetTP[1] <- round((log(small$Price[1]) - log(dataset$Price[1]))*100,2)
-
-## Days between TPcand pair
-small$DaysBetTP <- as.numeric(small$Date - lag(small$Date,1))
-small$DaysBetTP[1] <- as.numeric(small$Date[1] - dataset$Date[1])
-
-## No. sessions between TPcand pair
-small$SessionsBetTP <- small$ObsNo - lag(small$ObsNo,1)
-small$SessionsBetTP[1] <- small$ObsNo[1]
-
-## Slope between TPcand pair (days)
-small$SlopeDayTP <- round((small$ReturnBetTP / as.numeric(small$DaysBetTP))*100,2)
-
-## Slope between TPcand pair (sessions)
-small$SlopeSesTP <- round((small$ReturnBetTP / small$SessionsBetTP)*100,2)
-
-# * 5.8 "Between TPcand and its identifier" features ----
-
-## Returns between TPcand and its identifier
-small$ReturnTP_ID <- round((log(small$IDPrice) - log(small$Price))*100,2)
-
-## Days between TPcand and its identifier
-small$DaysTP_ID <- as.numeric(dataset$Date[small$IDObs] - small$Date)
-
-## No. sessions between TPcand and its identifier
-small$SessionsTP_ID <- (small$IDObs - small$ObsNo)
-
-## Slope between TPcand and its identifier (days)
-small$SlopeDayTP_ID <- round((small$ReturnTP_ID / as.numeric(small$DaysTP_ID))*100,2)
-
-## Slope between TPcand and its identifier (sessions)
-small$SlopeSesTP_ID <- round((small$ReturnTP_ID / small$SessionsTP_ID)*100,2)
-
-
-
-# * 5.9 "Between Identifiers" features ----
-
-##Returns between Identifiers
-small$ReturnBetIDs <- round((log(small$IDPrice) - log(lag(small$IDPrice,1)))*100,2)
-small$ReturnBetIDs[1] <- round((log(small$IDPrice[1]) - log(dataset$Price[1]))*100,2)
-
-## Days between Identifiers 
-small$DaysBetIDs <- as.numeric(dataset$Date[small$IDObs] - lag(dataset$Date[small$IDObs],1))
-small$DaysBetIDs[1] <- as.numeric(dataset$Date[small$IDObs[1]] - dataset$Date[1])
-
-## No. sessions between Identifiers
-small$SessionsBetID <- small$IDObs - lag(small$IDObs,1)
-small$SessionsBetID[1] <- small$IDObs[1]
-
-## Slope between Identifiers pair (days)
-small$SlopeDayID <- round((small$ReturnBetIDs / as.numeric(small$DaysBetIDs))*100,2)
-
-## Slope between Identifiers pair (sessions)
-small$SlopeSesID <- round((small$ReturnBetIDs / small$SessionsBetID)*100,2)
-
-
-
-# * 5.10 Benchmark computations ------
-
-## Appending small dataset with benchmark prices
-#small$sp500PriceTP <- dataset$spx.index[small$ObsNo]
-#small$sp500PriceID <- dataset$spx.index[small$IDObs]
-
-## Benchmark returns between TPcand pair
-#small$sp500ReturnTP <- round((log(small$sp500PriceTP) - log(lag(small$sp500PriceTP,1)))*100,2)
-#small$sp500ReturnTP[1] <- round((log(small$sp500PriceTP[1]) - log(dataset$spx.index[1]))*100,2)
-
-## Benchmark returns between TPcand and its identifier
-#small$sp500ReturnTP_ID <- round((log(small$sp500PriceID) - log(small$sp500PriceTP))*100,2)
-
-## Benchmark returns between identifiers
-#small$sp500ReturnID <- round((log(small$sp500PriceID) - log(lag(small$sp500PriceID,1)))*100,2)
-#small$sp500ReturnID[1] <- round((log(small$sp500PriceID[1]) - log(dataset$spx.index[1]))*100,2)
-
-## Benchmark vs DJI
-#small$ReturnDJIvsSP500TP <- small$ReturnBetTP - small$sp500PriceTP
-#small$ReturnDJIvsSP500ID <- small$ReturnBetIDs - small$sp500ReturnID
-#small$ReturnDJIvsSP500TP_ID <- small$ReturnTP_ID - small$sp500ReturnTP_ID
-
-
-
-# * 5.11 Volatility computations (volatility function) ------
-
-# Stack Overflow question (using '$' in atomic vector)
-#dataset$SessionsInYear <- sapply(match_vec, function(match_table) match_table[match_table$Var1 == match_vec,2])
-
-# Counting No. sessions in the year the observation took place
-match_vec <- as.integer(year(dataset$Date))
-match_table <- as.data.frame(table(year(dataset$Date)))
-
-dataset$SessionsInYear <- vector("numeric", nrow(dataset))
-for(i in seq_along(dataset$Date)){
-  dataset$SessionsInYear[i] <- match_table[match_table$Var1 == match_vec[i],2]
-}
-
-small$SessInYear <- dataset$SessionsInYear[small$ObsNo]
-AvgSessionNo <- round(small$SessInYear %>% mean())
-rm(i,match_table,match_vec)
-
-# Volatility
-dataset$volWeekly <- volatility(dataset$Price, 5, calc = "close", N = AvgSessionNo)
-dataset$volMonthly <- volatility(dataset$Price, 21, calc = "close", N = AvgSessionNo)
-dataset$volQuarterly <- volatility(dataset$Price, 63, calc = "close", N = AvgSessionNo)
-dataset$volYearly <- volatility(dataset$Price, n = AvgSessionNo, calc = "close", N = AvgSessionNo)
-
-small$volWeeklyTP <- dataset$volWeekly[small$ObsNo]
-small$volMonthlyTP <- dataset$volMonthly[small$ObsNo]
-small$volQuarterlyTP <- dataset$volQuarterly[small$ObsNo]
-#mall$volYearlyTP <- dataset$volYearly[small$ObsNo]
-
-small$volWeeklyID <- dataset$volWeekly[small$IDObs]
-small$volMonthlyID <- dataset$volMonthly[small$IDObs]
-small$volQuarterlyID <- dataset$volQuarterly[small$IDObs]
-#small$volYearlyID <- dataset$volYearly[small$IDObs]
-
-
-# * 5.12 Weekday/ Month Identification --------
-
-# Names extraction
-dataset$Weekdayid <- weekdays(as.Date(dataset$Date))
-dataset$Monthid <- months(dataset$Date)
-
-# Factorizing & levels re-ordering
-dataset$Weekdayid <- factor(dataset$Weekdayid,
-                            levels(factor(dataset$Weekdayid))[c(2,4,5,3,1)])
-dataset$Monthid <- factor(dataset$Monthid,
-                          levels(factor(dataset$Monthid))[c(5,4,8,1,9,7,6,2,12,11,10,3)])
-
-# Factor to numeric conversion
-dataset$Weekdayid <- factor(as.numeric(dataset$Weekdayid))
-dataset$Monthid <- factor(as.numeric(dataset$Monthid))
-
-dataset$Weekdayid <- as.numeric(levels(dataset$Weekdayid))[dataset$Weekdayid]
-dataset$Monthid <- as.numeric(levels(dataset$Monthid))[dataset$Monthid]
-
-# Copying IDs to the 'small' df
-small$WeekdayTP <- dataset$Weekdayid[small$ObsNo]
-small$MonthTP <- dataset$Monthid[small$ObsNo]
-
-small$WeekdayID <- dataset$Weekdayid[small$IDObs]
-small$MonthID <- dataset$Monthid[small$IDObs]
-
-# * 5.13 Trading pauses distribution --------
-
-#small$breaksTP_ID <- small$DaysTP_ID - small$SessionsTP_ID
-#small$breaksTP_TP <- small$DaysBetTP - small$SessionsBetTP
-#small$breaksID_ID <- small$DaysBetIDs - small$SessionsBetID
-
-
-# 6. Output print ---------------
-
-#str(small)
-#head(small,8)
-#tail(small,8)
-#(dataset)
-#head(dataset,8)
-#tail(dataset,8)
-
-
-
-# 7. Corelation Matrix ------
-
-dev.new()
-small_cor <- cor(subset(small, select = -c(Date,ObsNo,IDObs)))
-res1 <- cor.mtest(subset(small,select = -c(Date,ObsNo,IDObs)), conf.level = .90)
-
-dev.new()
-corrplot(small_cor, type = "lower", method = "circle", tl.srt = 45,
-         tl.col = "black")
-dev.new()
-corrplot(small_cor,type = "lower",tl.srt = 15,
-         p.mat = res1$p, insig.level = .1, tl.col = "black")
-
-
-# 8. Cleaning Data  -----------------
-
-small_clean <- small %>% 
-               select(-Date,-ObsNo,-IDObs) %>% 
-               mutate(TPreal = factor(TPreal, levels = c(0,1), labels = c("False", "True"))) %>%
-               na.omit()
+gist$CumVolROC_spx_TPcand[is.na(gist$CumVolROC_spx_TPcand)] <- 0
 
 
 # 9. Simple Decision Tree---------------------------------------------------------------
 
-# Pre-processing:
-# Zero-variance and Near Zero-Variance Predictors unlikely to cause issues
-# in tree-based model
-
-# Correlated Predictors reduction:
-# This section is just for sake of experiment, we do not normally care about
-# highly correlated predictors in the tree-based models
-
-# Evaluation
-summary(small_cor[upper.tri(small_cor)])
-
-# Highly correlated descriptors identification (absolute correlaton > 0.75)
-highlyCor <- findCorrelation(small_cor, cutoff = .8)
-
-# Flagged predictors removal 
-smallSDT <- subset(small, select = -c(Date,ObsNo,IDObs))
-smallSDT <- smallSDT[,-highlyCor]
-
-# Re-evaluation
-smallSDTcor <- cor(smallSDT)
-summary(smallSDTcor[upper.tri(smallSDTcor)])
-
-# Factorizing newly-emerged subset: 
-smallSDT <- smallSDT %>%
-  mutate(TPreal = factor(TPreal, levels = c(0,1), labels = c("False", "True"))) %>%
-  na.omit()
-
 # Data Splitting
 set.seed(101)
-trainIndex <- createDataPartition(small_clean$TPreal, p = 0.75, list = FALSE)
+trainIndex <- createDataPartition(gist$TPreal, p = 0.85, list = FALSE)
 
 # Split with highly correlated predictors
-trainingSDT <- small_clean[trainIndex, ]
-testingSDT <- small_clean[-trainIndex, ]
-
-# SPlit with highly correlated descriptors REMOVED
-trainingSDT2 <- smallSDT[trainIndex, ]
-testingSDT2 <- smallSDT[-trainIndex, ]
+trainingSDT <- gist[trainIndex, ]
+testingSDT <- gist[-trainIndex, ]
 
 # Model Training and Tuning
 
@@ -544,60 +188,39 @@ testingSDT2 <- smallSDT[-trainIndex, ]
 prop.table(table(trainingSDT$TPreal))
 prop.table(table(testingSDT$TPreal))
 
-# With highly correlated predictors
+# Fitting the model
 set.seed(112)
 rPartfit <- rpart(TPreal~., data = trainingSDT, method = 'class')
 dev.new()
 rpart.plot(rPartfit, extra = 106)
 
-# With highly correlated descriptors REMOVED
-rPartfit2 <- rpart(TPreal~., data = trainingSDT2, method = 'class')
-dev.new()
-rpart.plot(rPartfit2, extra = 106)
-
 # Extracting Predictions
-
-# With highly correlated predictors
 predict_unseen_Test <-predict(rPartfit, testingSDT, type = 'class')
 confusionMatrix(data = predict_unseen_Test, testingSDT$TPreal)
 
-## Overfitting cross-validation
 predict_unseen_Train <-predict(rPartfit, trainingSDT, type = 'class')
 confusionMatrix(data = predict_unseen_Train, trainingSDT$TPreal)
+
+pred  <- prediction(as.numeric(testingSDT$TPreal), as.numeric(predict_unseen_Test))
+roc   <- performance(pred, measure="tpr", x.measure="fpr")
+
+auc = performance(pred, 'auc')
+gauge_SDT <- slot(auc, 'y.values')
+print(paste("AUC TEST set:", gauge_SDT))
 
 pred2  <- prediction(as.numeric(trainingSDT$TPreal), as.numeric(predict_unseen_Train))
 roc2   <- performance(pred2, measure="tpr", x.measure="fpr")
 
 auc2 = performance(pred2, 'auc')
 gauge_SDTcv <- slot(auc2, 'y.values')
-print(paste("Area under the curve for subset with all predictors TRAIN:", gauge_SDTcv))
-######
-pred  <- prediction(as.numeric(testingSDT$TPreal), as.numeric(predict_unseen_Test))
-roc   <- performance(pred, measure="tpr", x.measure="fpr")
+print(paste("AUC TRAIN set:", gauge_SDTcv))
+
 dev.new()
 plot(roc, col="orange", lwd=2)
 lines(x=c(0, 1), y=c(0, 1), col="red", lwd=2)
 
-auc = performance(pred, 'auc')
-gauge_SDT <- slot(auc, 'y.values')
-print(paste("Area under the curve for subset with all predictors:", gauge_SDT))
-
-# With highly correlated descriptors REMOVED
-predict_unseen_Test2 <-predict(rPartfit2, testingSDT2, type = 'class')
-confusionMatrix(data = predict_unseen_Test2, as.factor(testingSDT2$TPreal))
-
-pred2  <- prediction(as.numeric(testingSDT2$TPreal), as.numeric(predict_unseen_Test2))
-roc2   <- performance(pred2, measure="tpr", x.measure="fpr")
-dev.new()
-plot(roc2, col="orange", lwd=2)
-lines(x=c(0, 1), y=c(0, 1), col="red", lwd=2)
-
-auc2 = performance(pred2, 'auc')
-gauge_SDT2 <- slot(auc2, 'y.values')
-print(paste("Area under the curve for subset with highly correlated predictors removed:", gauge_SDT2))
-
 #
-rm(predict_unseen_Test,predict_unseen_Test2, pred,pred2, roc,roc2, auc, auc2)
+#rm(predict_unseen_Test, pred,pred2, roc,roc2, auc, auc2)
 
 # 10. Partial least squares discriminant analysis (PLS) ---------------------------------------
 
@@ -670,6 +293,15 @@ print(paste("ROC for predicitons on TRAINING subset:", gauge_PLS.train))
 rm(plsTPreal)
 # 11. XGB Tree -------------------------------------------------------------------
 
+# Data Splitting
+
+set.seed(101)
+trainIndex <- createDataPartition(gist$TPreal, p = 0.85, list = FALSE)
+
+trainingXGB <- gist[trainIndex, ]
+testingXGB <- gist[-trainIndex, ]
+
+
 # Tuning Grid
 xgbGrid <- expand.grid(nrounds = c(1, 10),
                        max_depth = c(1, 4),
@@ -679,13 +311,6 @@ xgbGrid <- expand.grid(nrounds = c(1, 10),
                        min_child_weight = 1,
                        subsample = c(.8, 1))
 
-
-# Data Splitting
-# set.seed(101)
-# trainIndex <- createDataPartition(small_clean$TPreal, p = 0.75, list = FALSE)
-
-trainingXGB <- small_clean[trainIndex, ]
-testingXGB <- small_clean[-trainIndex, ]
 
 # Model Training and Tuning
 ctrlXGB_cv <- trainControl(method = "cv",
@@ -735,7 +360,7 @@ ggplot(xgbFit_cv)
 xgbFit_loocv
 dev.new()
 ggplot(xgbFit_loocv)
-xgbFit_none
+
 
 # Extracting Predictions
 xgbTPreal_cv <- predict.train(xgbFit_cv, newdata = testingXGB)
@@ -779,14 +404,20 @@ dev.new()
 plot(xgbTPreal_none.ROC, main = "xgboost ROC method: none")
 
 # ROC scores cross-validation
-xgbTPreal_loocvtrain.probs <- predict.train(xgbFit_loocv, newdata = trainingXGB, type = "prob")
+xgbTPreal_loocvtrain.probs  <- predict.train(xgbFit_loocv, newdata = trainingXGB, type = "prob")
+xgbTPreal_cvtrain.probs     <- predict.train(xgbFit_cv, newdata = trainingXGB, type = "prob")
 
-xgbTPreal_loocvtrain.ROC <- roc(xgbTPreal_loocvtrain.probs$False,
+xgbTPreal_loocvtrain.ROC  <- roc(xgbTPreal_loocvtrain.probs$False,
+                                response = trainingXGB$TPreal,
+                                levels=rev(levels(trainingXGB$TPreal)))
+xgbTPreal_cvtrain.ROC     <- roc(xgbTPreal_cvtrain.probs$False,
                                 response = trainingXGB$TPreal,
                                 levels=rev(levels(trainingXGB$TPreal)))
 
-print(paste("ROC for predicitons on TEST subset:", xgbTPreal_loocv.ROC$auc))
-print(paste("ROC for predicitons on TRAINING subset:", xgbTPreal_loocvtrain.ROC$auc))
+print(paste("AUC for loocv on TEST subset:", xgbTPreal_loocv.ROC$auc))
+print(paste("AUC for cv on TEST subset:", xgbTPreal_cv.ROC$auc))
+print(paste("AUC for loocv on TRAINING subset:", xgbTPreal_loocvtrain.ROC$auc))
+print(paste("AUC for cv on TRAINING subset:", xgbTPreal_cvtrain.ROC$auc))
 
 
 # 12. Support Vector Machines with Radial Basis Function Kernel-------------
