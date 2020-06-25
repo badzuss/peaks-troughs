@@ -5,6 +5,7 @@ pacman::p_load(pacman,tidyverse,stringr, forcats,readxl,TTR,quantmod,corrplot,
                rpart,rpart.plot,lubridate,caret,e1071,xgboost,pROC,ROCR, grDevices)
 
 source("mung.R")
+source("eda.R")
 
 # 2. Reading data ------------------------------------------
 
@@ -161,586 +162,49 @@ djia_core <- chainDistribution2(djia_core)
 
 # 6. Cleaning data ------------------------------------------------------
 
-gist <- djia_core[which(is.na(djia_core$Volume_spx) == FALSE)[1] : nrow(djia_core),]
-gist <- gist %>% filter(TPcand == 1) %>% select(-c("Date", "ObsNo", "L1P", "L1T", "L2P", 
-                                                         "L2T", "L3P", "L3T", "IDObs", "TPcand",
-                                                         "Weekday", "Month", "PosInaRow_TPcand",
-                                                         "NegInaRow_TPcand", "GainInaRow_TPcand",
-                                                         "LossInaRow_TPcand", "FDTR", "USGG10")) %>%
+#gist <- djia_core[which(is.na(djia_core$Volume_spx) == FALSE)[1] : nrow(djia_core),]
+
+
+gist <- djia_core %>% filter(TPcand == 1) %>% select(-c("Date", "ObsNo", "L1P", "L1T", "L2P", 
+                                                    "L2T", "L3P", "L3T", "IDObs", "TPcand",
+                                                    "Weekday", "Month", "PosInaRow_TPcand",
+                                                    "NegInaRow_TPcand", "GainInaRow_TPcand",
+                                                    "LossInaRow_TPcand", "FDTR", "USGG10",
+                                                    "Volume_spx", "ROC_vol_spx", "CumVolROC_spx_TPcand")) %>%
   mutate(TPreal = factor(TPreal, levels = c(0,1), labels = c("False", "True")))
 
-gist$CumVolROC_spx_TPcand[is.na(gist$CumVolROC_spx_TPcand)] <- 0
+#filling NAs
 
+usur_sampel <- numeric(4)
+for(i in 1:4){
+  usur_sampel[i] <- mean(sample(gist$USUR[5:40], 5))
+}
+gist$USUR[1:4] <- usur_sampel
 
-# 9. Simple Decision Tree---------------------------------------------------------------
+volatility_y_sample <- mean(gist$Volatility_Y[2:4])
 
-# Data Splitting
-set.seed(101)
-trainIndex <- createDataPartition(gist$TPreal, p = 0.85, list = FALSE)
+gist$Volatility_Y[1] <- volatility_y_sample
 
-# Split with highly correlated predictors
-trainingSDT <- gist[trainIndex, ]
-testingSDT <- gist[-trainIndex, ]
+rm(i, volatility_y_sample, usur_sampel)
 
-# Model Training and Tuning
+#gist$CumVolROC_spx_TPcand[is.na(gist$CumVolROC_spx_TPcand)] <- 0
 
-# Subsets validation
-prop.table(table(trainingSDT$TPreal))
-prop.table(table(testingSDT$TPreal))
+which(is.na(gist))
 
-# Fitting the model
-set.seed(112)
-rPartfit <- rpart(TPreal~., data = trainingSDT, method = 'class')
-dev.new()
-rpart.plot(rPartfit, extra = 106)
 
-# Extracting Predictions
-predict_unseen_Test <-predict(rPartfit, testingSDT, type = 'class')
-confusionMatrix(data = predict_unseen_Test, testingSDT$TPreal)
+# 7. Fitting models ---------------------------------------------------------------
 
-predict_unseen_Train <-predict(rPartfit, trainingSDT, type = 'class')
-confusionMatrix(data = predict_unseen_Train, trainingSDT$TPreal)
+simpleDecisionTree(gist, proportion = 0.72, seed_split = 101)
 
-pred  <- prediction(as.numeric(testingSDT$TPreal), as.numeric(predict_unseen_Test))
-roc   <- performance(pred, measure="tpr", x.measure="fpr")
+glmModel(gist, proportion = 0.72, seed_split = 101)
 
-auc = performance(pred, 'auc')
-gauge_SDT <- slot(auc, 'y.values')
-print(paste("AUC TEST set:", gauge_SDT))
+pls(gist, proportion = 0.75, seed_split = 101, seed_train = 112)
 
-pred2  <- prediction(as.numeric(trainingSDT$TPreal), as.numeric(predict_unseen_Train))
-roc2   <- performance(pred2, measure="tpr", x.measure="fpr")
+xgbTree(gist, proportion = 0.72, seed_split = 101, seed_train = 112)
 
-auc2 = performance(pred2, 'auc')
-gauge_SDTcv <- slot(auc2, 'y.values')
-print(paste("AUC TRAIN set:", gauge_SDTcv))
+PenalizedReg(gist, proportion = 0.69, seed_split = 101, seed_train = 112)
 
-dev.new()
-plot(roc, col="orange", lwd=2)
-lines(x=c(0, 1), y=c(0, 1), col="red", lwd=2)
-
-#
-#rm(predict_unseen_Test, pred,pred2, roc,roc2, auc, auc2)
-
-# 10. Partial least squares discriminant analysis (PLS) ---------------------------------------
-
-# Pre-processing:Zero-variance and Near Zero-Variance Predictors evaluation
-nzv <- nearZeroVar(small_clean)
-str(nzv)
-if(length(nzv) != 0){small_clean <- small_clean_temp[, -nzv]}
-
-# Data Splitting
-# set.seed(101)
-# trainIndex <- createDataPartition(small_clean$TPreal, p = 0.75, list = FALSE)
-
-trainingPLS <- small_clean[trainIndex, ]
-testingPLS <- small_clean[-trainIndex, ]
-
-# Model Training and Tuning
-ctrlPLS <- trainControl(method = "cv",
-                        number = 10,
-                        returnResamp = "all",
-                        classProbs = TRUE,
-                        summaryFunction = twoClassSummary)
-
-
-set.seed(112)
-plsFit <- train(TPreal~.,
-                data = trainingPLS, 
-                method = "pls", 
-                preProc = c("center", "scale"),
-                tuneLength = 15, 
-                trControl = ctrlPLS, 
-                metric = "ROC")
-
-plsFit
-dev.new()
-ggplot(plsFit)
-
-# Extracting Predictions
-plsTPreal <- predict.train(plsFit, 
-                           newdata = testingPLS)
-
-plsTPreal.probs <- predict.train(plsFit,
-                                 newdata = testingPLS, 
-                                 type = "prob")
-
-plsTPreal.ROC <- roc(plsTPreal.probs$False, 
-                     response = testingPLS$TPreal,
-                     levels = rev(levels(testingPLS$TPreal)))
-
-dev.new()
-plot(plsTPreal.ROC, main = "PLS ROC resampling: cv")
-
-confusionMatrix(data = plsTPreal, testingPLS$TPreal)
-gauge_PLS <- plsTPreal.ROC$auc
-gauge_PLS
-
-# ROC score cross-validation:
-plsTPreal.probs.train <- predict.train(plsFit,
-                                      newdata = trainingPLS, 
-                                      type = "prob")
-
-plsTPreal.ROC.train <- roc(plsTPreal.probs.train$False, 
-                            response = trainingPLS$TPreal,
-                            levels = rev(levels(trainingPLS$TPreal)))
-
-gauge_PLS.train <- plsTPreal.ROC.train$auc
-print(paste("ROC for predicitons on TEST subset:", gauge_PLS))
-print(paste("ROC for predicitons on TRAINING subset:", gauge_PLS.train))
-
-
-rm(plsTPreal)
-# 11. XGB Tree -------------------------------------------------------------------
-
-# Data Splitting
-
-set.seed(101)
-trainIndex <- createDataPartition(gist$TPreal, p = 0.85, list = FALSE)
-
-trainingXGB <- gist[trainIndex, ]
-testingXGB <- gist[-trainIndex, ]
-
-
-# Tuning Grid
-xgbGrid <- expand.grid(nrounds = c(1, 10),
-                       max_depth = c(1, 4),
-                       eta = c(.1, .4),
-                       gamma = 0,
-                       colsample_bytree = .7,
-                       min_child_weight = 1,
-                       subsample = c(.8, 1))
-
-
-# Model Training and Tuning
-ctrlXGB_cv <- trainControl(method = "cv",
-                            number = 10,
-                            returnResamp = "all",
-                            classProbs = TRUE,
-                            summaryFunction = twoClassSummary)
-
-ctrlXGB_loocv <- trainControl(method = "LOOCV",
-                          classProbs = TRUE, 
-                          summaryFunction = twoClassSummary)
-
-ctrlXGB_none <- trainControl(method = "none",
-                          classProbs = TRUE,
-                          summaryFunction = twoClassSummary)
-
-
-set.seed(112)
-xgbFit_cv <- train(TPreal~.,
-                  data = trainingXGB,
-                  method = "xgbTree",
-                  trControl = ctrlXGB_cv,
-                  metric = "ROC",
-                  preProc = c("center", "scale"),
-                  tuneGrid = xgbGrid)
-
-xgbFit_loocv <- train(TPreal~.,
-                  data = trainingXGB,
-                  method = "xgbTree",
-                  trControl = ctrlXGB_loocv,
-                  metric = "ROC",
-                  preProc = c("center", "scale"),
-                  tuneGrid = xgbGrid)
-
-xgbFit_none <- train(TPreal~.,
-                  data = trainingXGB,
-                  method = "xgbTree", 
-                  trControl = ctrlXGB_none,
-                  tuneGrid = xgbGrid[nrow(xgbGrid),],
-                  metric = "ROC", 
-                  preProc = c("center", "scale"))
-
-
-xgbFit_cv
-dev.new()
-ggplot(xgbFit_cv)
-xgbFit_loocv
-dev.new()
-ggplot(xgbFit_loocv)
-
-
-# Extracting Predictions
-xgbTPreal_cv <- predict.train(xgbFit_cv, newdata = testingXGB)
-xgbTPreal_loocv <- predict.train(xgbFit_loocv, newdata = testingXGB)
-xgbTPreal_none <- predict.train(xgbFit_none, newdata = testingXGB)
-
-confusionMatrix(data = xgbTPreal_cv, testingXGB$TPreal)
-confusionMatrix(data = xgbTPreal_loocv, testingXGB$TPreal)
-confusionMatrix(data = xgbTPreal_none, testingXGB$TPreal)
-
-xgbTPreal_cv.probs <- predict.train(xgbFit_cv, newdata = testingXGB, type = "prob")
-xgbTPreal_loocv.probs <- predict.train(xgbFit_loocv, newdata = testingXGB, type = "prob")
-xgbTPreal_none.probs <- predict.train(xgbFit_none, newdata = testingXGB, type = "prob")
-
-xgbTPreal_cv.ROC <- roc(xgbTPreal_cv.probs$False,
-                       response = testingXGB$TPreal,
-                       levels=rev(levels(testingXGB$TPreal)))
-
-xgbTPreal_loocv.ROC <- roc(xgbTPreal_loocv.probs$False,
-                       response = testingXGB$TPreal,
-                       levels=rev(levels(testingXGB$TPreal)))
-
-xgbTPreal_none.ROC <- roc(xgbTPreal_none.probs$False,
-                       response = testingXGB$TPreal,
-                       levels=rev(levels(testingXGB$TPreal)))
-
-
-gauge_XGB_cv <- xgbTPreal_cv.ROC$auc
-gauge_XGB_cv
-dev.new()
-plot(xgbTPreal_cv.ROC, main = "xgboost ROC method: cv")
-
-gauge_XGB_loocv <- xgbTPreal_loocv.ROC$auc
-gauge_XGB_loocv
-dev.new()
-plot(xgbTPreal_loocv.ROC, main = "xgboost ROC method: LOOCV")
-
-gauge_XGB_none <- xgbTPreal_none.ROC$auc
-gauge_XGB_none
-dev.new()
-plot(xgbTPreal_none.ROC, main = "xgboost ROC method: none")
-
-# ROC scores cross-validation
-xgbTPreal_loocvtrain.probs  <- predict.train(xgbFit_loocv, newdata = trainingXGB, type = "prob")
-xgbTPreal_cvtrain.probs     <- predict.train(xgbFit_cv, newdata = trainingXGB, type = "prob")
-
-xgbTPreal_loocvtrain.ROC  <- roc(xgbTPreal_loocvtrain.probs$False,
-                                response = trainingXGB$TPreal,
-                                levels=rev(levels(trainingXGB$TPreal)))
-xgbTPreal_cvtrain.ROC     <- roc(xgbTPreal_cvtrain.probs$False,
-                                response = trainingXGB$TPreal,
-                                levels=rev(levels(trainingXGB$TPreal)))
-
-print(paste("AUC for loocv on TEST subset:", xgbTPreal_loocv.ROC$auc))
-print(paste("AUC for cv on TEST subset:", xgbTPreal_cv.ROC$auc))
-print(paste("AUC for loocv on TRAINING subset:", xgbTPreal_loocvtrain.ROC$auc))
-print(paste("AUC for cv on TRAINING subset:", xgbTPreal_cvtrain.ROC$auc))
-
-
-# 12. Support Vector Machines with Radial Basis Function Kernel-------------
-
-# Data Splitting
-# set.seed(101)
-# trainIndex <- createDataPartition(small_clean$TPreal, p = 0.75, list = FALSE)
-
-trainingSVM <- small_clean[trainIndex, ]
-testingSVM <- small_clean[-trainIndex, ]
-
-# TrainControl definitions
-# ctrlSVM1 <- trainControl(method = "repeatedcv",
-#                         number = 10,
-#                         repeats = 10,
-#                         classProbs = TRUE,
-#                         summaryFunction = twoClassSummary)
-
-ctrlSVM2 <- trainControl(method = "cv",
-                           number = 10,
-                           returnResamp = "all",
-                           classProbs = TRUE,
-                           summaryFunction = twoClassSummary)
-
-# ctrlSVM3 <- trainControl(method = "boot",
-#                          number = 10,
-#                          returnResamp = "all",
-#                          classProbs = TRUE,
-#                          summaryFunction = twoClassSummary)
-
-# ctrlSVM4 <- trainControl(method = "LOOCV",
-#                          classProbs = TRUE, 
-#                          summaryFunction = twoClassSummary)
-
-# Training
-set.seed(112)
-# svmFit1 <- train(TPreal~.,
-#                    data = trainingSVM,
-#                    method = "svmRadial",
-#                    trControl = ctrlSVM1,
-#                    metric = "ROC",
-#                    preProc = c("center", "scale"),
-#                    tuneLength = 8)
-
-svmFit2 <- train(TPreal~.,
-                 data = trainingSVM,
-                 method = "svmRadial",
-                 trControl = ctrlSVM2,
-                 metric = "ROC",
-                 preProc = c("center", "scale"),
-                 tuneLength = 8)
-
-# svmFit3 <- train(TPreal~.,
-#                  data = trainingSVM,
-#                  method = "svmRadial",
-#                  trControl = ctrlSVM3,
-#                  metric = "ROC",
-#                  preProc = c("center", "scale"),
-#                  tuneLength = 8)
-# 
-# svmFit4 <- train(TPreal~.,
-#                  data = trainingSVM,
-#                  method = "svmRadial",
-#                  trControl = ctrlSVM4,
-#                  metric = "ROC",
-#                  preProc = c("center", "scale"),
-#                  tuneLength = 8)
-
-
-# Summary
-# svmFit1
-# dev.new()
-# ggplot(svmFit1)
-svmFit2
-dev.new()
-ggplot(svmFit2)
-# svmFit3
-# dev.new()
-# ggplot(svmFit3)
-# svmFit4
-# dev.new()
-# ggplot(svmFit4)
-
-
-# Extracting Predictions
-
-# svmFit1.predict <- predict.train(svmFit1, newdata = testingSVM)
-svmFit2.predict <- predict.train(svmFit2, newdata = testingSVM)
-# svmFit3.predict <- predict.train(svmFit3, newdata = testingSVM)
-# svmFit4.predict <- predict.train(svmFit4, newdata = testingSVM)
-
-# svmFit1.probs <- predict.train(svmFit1, newdata = testingSVM, type = "prob")
-svmFit2.probs <- predict.train(svmFit2, newdata = testingSVM, type = "prob")
-# svmFit3.probs <- predict.train(svmFit3, newdata = testingSVM, type = "prob")
-# svmFit4.probs <- predict.train(svmFit4, newdata = testingSVM, type = "prob")
-
-# svmFit1.roc <- roc(svmFit1.probs$False, response = testingSVM$TPreal,levels=rev(levels(testingSVM$TPreal)))
-svmFit2.roc <- roc(svmFit2.probs$False, response = testingSVM$TPreal,levels=rev(levels(testingSVM$TPreal)))
-# svmFit3.roc <- roc(svmFit3.probs$False, response = testingSVM$TPreal,levels=rev(levels(testingSVM$TPreal)))
-# svmFit4.roc <- roc(svmFit4.probs$False, response = testingSVM$TPreal,levels=rev(levels(testingSVM$TPreal)))
-
-# Confusion Matrix
-# confusionMatrix(data = svmFit1.predict, testingSVM$TPreal)
-confusionMatrix(data = svmFit2.predict, testingSVM$TPreal)
-# confusionMatrix(data = svmFit3.predict, testingSVM$TPreal)
-# confusionMatrix(data = svmFit4.predict, testingSVM$TPreal)
-
-# Plotting
-# gauge_SVM1 <- svmFit1.roc$auc
-gauge_SVM2 <- svmFit2.roc$auc
-# gauge_SVM3 <- svmFit3.roc$auc
-# gauge_SVM4 <- svmFit4.roc$auc
-
-# dev.new()
-# plot(svmFit1.roc, main = "SVM ROC resampling: repeatedcv")
-dev.new()
-plot(svmFit2.roc, main = "SVM ROC resampling: cv")
-# dev.new()
-# plot(svmFit3.roc, main = "SVM ROC resampling: boot")
-# dev.new()
-# plot(svmFit4.roc, main = "SVM ROC resampling: LOOCV")
-
-# ROC score cross-validation:
-
-svmFit2.probs.train <- predict.train(svmFit2, newdata = trainingSVM, type = "prob")
-svmFit2.roc.train <- roc(svmFit2.probs.train$False, 
-                         response = trainingSVM$TPreal,
-                         levels=rev(levels(trainingSVM$TPreal)))
-
-print(paste("ROC for predicitons on TEST subset:", svmFit2.roc$auc))
-print(paste("ROC for predicitons on TRAINING subset:", svmFit2.roc.train$auc))
-
-# 13. Logistic Regression-----
-
-# Data Splitting
-# set.seed(101)
-# trainIndex <- createDataPartition(small_clean$TPreal, p = 0.75, list = FALSE)
-
-
-trainingGLM <- small_clean[trainIndex, ]
-testingGLM <- small_clean[-trainIndex, ]
-
-# TrainControl Definition
-ctrlGLM1 <- trainControl(method = "cv",
-                         number = 10,
-                         returnResamp = "all",
-                         classProbs = TRUE,
-                         summaryFunction = twoClassSummary)
-
-ctrlGLM2 <- trainControl(method = "repeatedcv",
-                         number = 10,
-                         repeats = 10,
-                         classProbs = TRUE,
-                         summaryFunction = twoClassSummary)
-
-# Training
-set.seed(112)
-glmFit1 <- train(TPreal~.,
-                 data = trainingGLM,
-                 method = "glm",
-                 trControl = ctrlGLM1,
-                 metric = "ROC",
-                 preProc = c("center", "scale"),
-                 family = "binomial")
-
-glmFit2 <- train(TPreal~.,
-                 data = trainingGLM,
-                 method = "glm",
-                 trControl = ctrlGLM2,
-                 metric = "ROC",
-                 preProc = c("center", "scale"),
-                 family = "binomial")
-
-# Summary
-glmFit1
-glmFit2
-
-# Extracting Predictions
-glmFit1.predict <- predict.train(glmFit1, newdata = testingGLM)
-glmFit2.predict <- predict.train(glmFit2, newdata = testingGLM)
-
-glmFit1.probs <- predict.train(glmFit1, newdata = testingGLM, type = "prob")
-glmFit2.probs <- predict.train(glmFit2, newdata = testingGLM, type = "prob")
-
-glmFit1.roc <- roc(glmFit1.probs$False, response = testingGLM$TPreal,levels=rev(levels(testingGLM$TPreal)))
-glmFit2.roc <- roc(glmFit2.probs$False, response = testingGLM$TPreal,levels=rev(levels(testingGLM$TPreal)))
-
-# Confusion Matrix
-confusionMatrix(data = glmFit1.predict, testingGLM$TPreal)
-confusionMatrix(data = glmFit2.predict, testingGLM$TPreal)
-
-# Plotting
-gauge_GLM1 <- glmFit1.roc$auc
-dev.new()
-plot(glmFit1.roc, main = "GLM ROC resampling: cv")
-
-gauge_GLM2 <- glmFit2.roc$auc
-dev.new()
-plot(glmFit2.roc, main = "GLM ROC resampling: repeatedcv")
-
-# ROC score cross-validation:
-
-glmFit2.probs.train <- predict.train(glmFit2, newdata = trainingGLM, type = "prob")
-glmFit2.roc.train <- roc(glmFit2.probs.train$False, 
-                   response = trainingGLM$TPreal,
-                   levels=rev(levels(trainingGLM$TPreal)))
-
-print(paste("ROC for predicitons on TEST subset:", glmFit2.roc$auc))
-print(paste("ROC for predicitons on TRAINING subset:", glmFit2.roc.train$auc))
-
-# 14. Penalized Regressions----------------
-
-# Data Splitting
-# set.seed(101)
-# trainIndex <- createDataPartition(small_clean$TPreal, p = 0.75, list = FALSE)
-
-trainingPEN <- small_clean[trainIndex, ]
-testingPEN <- small_clean[-trainIndex, ]
-
-lambda <- 10^seq(-3, 3, length = 100)
-
-# TrainControl Definition
-ctrlPEN <- trainControl(method = "cv",
-                         number = 10,
-                         returnResamp = "all",
-                         classProbs = TRUE,
-                         summaryFunction = twoClassSummary)
-
-# Training
-set.seed(112)
-enrFit1 <- train(TPreal~.,
-                 data = trainingPEN,
-                 method = "glmnet",
-                 trControl = ctrlPEN,
-                 metric = "ROC",
-                 preProc = c("center", "scale"),
-                 tuneLength = 10)
-
-rdgFit1 <- train(TPreal~.,
-                 data = trainingPEN,
-                 method = "glmnet",
-                 trControl = ctrlPEN,
-                 metric = "ROC",
-                 preProc = c("center", "scale"),
-                 tuneGrid = expand.grid(alpha = 0, lambda = lambda))
-
-lsoFit1 <- train(TPreal~.,
-                 data = trainingPEN,
-                 method = "glmnet",
-                 trControl = ctrlPEN,
-                 metric = "ROC",
-                 preProc = c("center", "scale"),
-                 tuneGrid = expand.grid(alpha = 1, lambda = lambda))
-
-
-
-# Summary
-enrFit1
-dev.new()
-ggplot(enrFit1)
-
-rdgFit1
-dev.new()
-ggplot(rdgFit1)
-
-lsoFit1
-dev.new()
-ggplot(lsoFit1)
-
-
-
-# Extracting Predictions
-enrFit1.predict <- predict.train(enrFit1, newdata = testingPEN)
-rdgFit1.predict <- predict.train(rdgFit1, newdata = testingPEN)
-lsoFit1.predict <- predict.train(lsoFit1, newdata = testingPEN)
-
-enrFit1.probs <- predict.train(enrFit1, newdata = testingPEN, type = "prob")
-rdgFit1.probs <- predict.train(rdgFit1, newdata = testingPEN, type = "prob")
-lsoFit1.probs <- predict.train(lsoFit1, newdata = testingPEN, type = "prob")
-
-enrFit1.roc <- roc(enrFit1.probs$False, response = testingPEN$TPreal,levels=rev(levels(testingPEN$TPreal)))
-rdgFit1.roc <- roc(rdgFit1.probs$False, response = testingPEN$TPreal,levels=rev(levels(testingPEN$TPreal)))
-lsoFit1.roc <- roc(lsoFit1.probs$False, response = testingPEN$TPreal,levels=rev(levels(testingPEN$TPreal)))
-
-
-# Confusion Matrix
-confusionMatrix(data = enrFit1.predict, testingPEN$TPreal)
-confusionMatrix(data = rdgFit1.predict, testingPEN$TPreal)
-confusionMatrix(data = lsoFit1.predict, testingPEN$TPreal)
-
-
-# Plotting
-gauge_ENR1 <- enrFit1.roc$auc
-dev.new()
-plot(enrFit1.roc, main = "Elastic Net Regresion ROC resampling: cv")
-
-gauge_RDG1 <- rdgFit1.roc$auc
-dev.new()
-plot(rdgFit1.roc, main = "Ridge Regression ROC resampling: cv")
-
-gauge_LSO1 <- lsoFit1.roc$auc
-dev.new()
-plot(lsoFit1.roc, main = "Lasso Regression ROC resampling: cv")
-
-# ROC score cross-validation:
-enrFit1.probs.train <- predict.train(enrFit1, newdata = trainingPEN, type = "prob")
-rdgFit1.probs.train <- predict.train(rdgFit1, newdata = trainingPEN, type = "prob")
-lsoFit1.probs.train <- predict.train(lsoFit1, newdata = trainingPEN, type = "prob")
-
-enrFit1.roc.train <- roc(enrFit1.probs.train$False,response = trainingPEN$TPreal,levels=rev(levels(trainingPEN$TPreal)))
-rdgFit1.roc.train <- roc(rdgFit1.probs.train$False,response = trainingPEN$TPreal,levels=rev(levels(trainingPEN$TPreal)))
-lsoFit1.roc.train <- roc(lsoFit1.probs.train$False,response = trainingPEN$TPreal,levels=rev(levels(trainingPEN$TPreal)))
-
-print(paste("ROC for predicitons on TEST subset(ENR):", enrFit1.roc$auc))
-print(paste("ROC for predicitons on TRAINING subset(ENR):", enrFit1.roc.train$auc))
-
-print(paste("ROC for predicitons on TEST subset(RiDGe):", rdgFit1.roc$auc))
-print(paste("ROC for predicitons on TRAINING subset(RiDGe):", rdgFit1.roc.train$auc))
-
-print(paste("ROC for predicitons on TEST subset(LaSsO):", lsoFit1.roc$auc))
-print(paste("ROC for predicitons on TRAINING subset(LaSsO):", lsoFit1.roc.train$auc))
-
-
+svmModel(gist, proportion = 0.72, seed_split = 101, seed_train = 112)
 
 
 # SUMMARY -------------------------------------------------------------------
@@ -760,7 +224,7 @@ print(paste(deparse(substitute(gauge_GLM2)), gauge_GLM2))
 print(paste(deparse(substitute(gauge_RDG1)), gauge_RDG1))
 #print(paste(deparse(substitute(gauge_LSO1)), gauge_LSO1))
 
-# Plotting
+# Plotting ----
 dev.new()
 plot(svmFit2.roc, main = "ROC curves for SVM, XGB & PLS")
 plot(xgbTPreal_cv.ROC, add = TRUE, col = "blue")
